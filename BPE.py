@@ -1,6 +1,7 @@
 # Code adapted from
 # https://yanivle.github.io/ai/2024/02/23/fast_minbpe.html
-import CountPair, IndexedList
+from CountPair import CountPair
+from IndexedList import IndexedList
 from typing import Dict
 import unittest
 import os
@@ -12,6 +13,8 @@ class BPE:
     """
 
     def __init__(self, vocab_size: int):
+        self.merges = []
+        self.vocab = {i: bytes([i]) for i in range(256)}
         self.vocab_size = vocab_size+256
         self.special_tokens = {'SOS': self.vocab_size,
                                 'PAD': (self.vocab_size+1),
@@ -19,7 +22,7 @@ class BPE:
 
     def build_indexed_list(self, text: str) -> IndexedList:  
         # Create an IndexedList with the encoded bytes.
-        return IndexedList.IndexedList(t for t in text.encode('utf-8'))
+        return IndexedList(t for t in text.encode('utf-8'))
 
 
     def init_pairs_stats(self, text: str) -> CountPair:  
@@ -27,7 +30,7 @@ class BPE:
            Initialize a CountPair with all overlapping pairs.
            For text "aaabd" the CountPair will contain: {(a,a): 2, (a, b): 1, (b, d): 1}
         """
-        return CountPair.CountPair(t for t in text.encode('utf-8'))
+        return CountPair(t for t in text.encode('utf-8'))
 
 
     def merge(self, pair: tuple[str, str], new_id: int, 
@@ -88,45 +91,36 @@ class BPE:
            is O(L)
 
            Arg:
-              text: str Used to create the merge vocab
-
-           Return:
-              merges: array A array where each element contains merge pairs 
-                            and their corresponding token id. The element order
-                            is the same order in which the merges were made.
-                            Merges is used to tokenize a given text.
-              vocab:  Dict  A hashtable mapping token ids to their corresponding
-                            pair. Vocab is used in detokenization of a given
-                            sequence of token ids. 
+              text: str Used to create the merge vocab 
         """
+        self.merges.clear()
+        self.vocab.clear()
+        self.vocab = {i: bytes([i]) for i in range(256)}
         print(f'Training tokenizer on text of length {len(text):,} with vocab of size {self.vocab_size:,}.')
         n_merges = self.vocab_size - 256
-        vocab = {i: bytes([i]) for i in range(256)}
-        merges = []
         indexed_list = self.build_indexed_list(text)
         stats = self.init_pairs_stats(text)
         for i in range(n_merges):
             if not stats: break  # Stop if we don't have any pairs (we should probably stop earlier).
             top_pair = stats.most_common
-            new_id = len(vocab)
-            merges.append((top_pair, new_id))
-            vocab[new_id] = vocab[top_pair[0]] + vocab[top_pair[1]]
+            new_id = len(self.vocab)
+            self.merges.append((top_pair, new_id))
+            self.vocab[new_id] = self.vocab[top_pair[0]] + self.vocab[top_pair[1]]
             self.merge(top_pair, new_id, indexed_list, stats)
-        return merges, vocab
 
 
-    def tokenize(self, text: str, merges: list[int]) -> list[int]:
+    def tokenize(self, text: str, ) -> list[int]:
         """
            Use merges array to map the characters in the given text
            to token integer ids. 
         """
         l = self.build_indexed_list(text)
-        for pair, new_id in merges:
+        for pair, new_id in self.merges:
             self.merge(pair, new_id, l, None)
         return [node.val for node in l]
 
 
-    def detokenize(self, seq: list[int], vocab: Dict[str, int]) -> list[str]:
+    def detokenize(self, seq: list[int]) -> list[str]:
         """
            Use vocabulary hashtable to map token integer ids
            to their corresponding merged character(s).
@@ -136,30 +130,28 @@ class BPE:
               vocab: Dict Hashtable mapping token ids integer keys
                      to merged character values
         """
-        return b''.join((vocab[t] for t in seq)).decode('utf-8')
+        return b''.join((self.vocab[t] for t in seq)).decode('utf-8')
 
-    def save(self, file: str, merges: dict[str, int]):
+    def save(self, file: str):
         """
            Saves the merges into a file. Vocab does not need to be saved
            since it can be recovered from merges.
         """
         with open(file, 'wb') as f:
-            pickle.dump(merges, f)
+            pickle.dump(self.merges, f)
 
-    def build_vocab(self, merges: list[tuple[str, int]]) -> Dict[str,int]:
-        # vocab is derived from merges
-        vocab = {idx: bytes([idx]) for idx in range(256)}
-        #print(vocab)
-        for pair, idx in merges:
-            vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
-        return vocab
+    def build_vocab(self) -> Dict[str,int]:
+        # Vocab is derived from merges.
+        self.vocab.clear()
+        self.vocab = {i: bytes([i]) for i in range(256)}
+        for pair, idx in self.merges:
+            self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
 
     def load(self, file: str):
         #Load the merges from the file and then build the vocab
         with open(file, 'rb') as f:
-            merges = pickle.load(f)
-        vocab = self.build_vocab(merges)
-        return merges, vocab
+            self.merges = pickle.load(f)
+        self.build_vocab()
 
 class TestBPE(unittest.TestCase):
 
@@ -212,7 +204,7 @@ class TestBPE(unittest.TestCase):
 
         """
 
-        merges, vocab = self.bpe.train(self.text)
+        self.bpe.train(self.text)
         expected_merges = [((ord('a'), ord('a')), 256), 
                             ((ord('a'), ord('b')), 257),
                             ((256, 257), 258),
@@ -222,33 +214,36 @@ class TestBPE(unittest.TestCase):
         expected_vocab[257] = b'ab'
         expected_vocab[258] = b'aaab'
         expected_vocab[259] = b'aaabd'
-        self.assertEqual(merges, expected_merges)
-        self.assertEqual(vocab, expected_vocab)
+        self.assertEqual(self.bpe.merges, expected_merges)
+        self.assertEqual(self.bpe.vocab, expected_vocab)
 
     def test_tokenize_then_detokenize(self):
         # The detokenization of tokenization should
         # return the original text
-        merges, vocab = self.bpe.train(self.text)
-        tokens = self.bpe.tokenize(self.text, merges)
-        detok = self.bpe.detokenize(tokens, vocab)
+        self.bpe.train(self.text)
+        tokens = self.bpe.tokenize(self.text)
+        detok = self.bpe.detokenize(tokens)
         self.assertEqual(detok, self.text)
 
     def test_save_and_load(self):
-        merges, vocab = self.bpe.train(self.text)
-        #self.bpe.merges = {pair: idx for pair, idx in merges}
-        self.bpe.save("test_bpe_model", merges)
+        self.bpe.train(self.text)
+        self.bpe.save("test_bpe_model")
         self.assertTrue(os.path.exists("test_bpe_model"))
         bpe2 = BPE(self.vocab_size)
-        merges2,vocab2 = bpe2.load("test_bpe_model")
-        self.assertEqual(merges2, merges)
-        self.assertEqual(vocab, vocab2)
+        bpe2.load("test_bpe_model")
+        self.assertEqual(self.bpe.merges, bpe2.merges)
+        self.assertEqual(self.bpe.vocab, bpe2.vocab)
         os.remove("test_bpe_model")
 
     def test_build_vocab(self):
-        merges, vocab = self.bpe.train(self.text)
-        #self.bpe.merges = {pair: idx for pair, idx in merges}
-        vocab2 = self.bpe.build_vocab(merges)
-        self.assertEqual(vocab2, vocab)
+        # Test the build_vocab function
+        # Assumption: Vocab is cleared pior to values
+        # being populated, otherwise the result of this test is invalid
+        self.bpe.train(self.text)
+        bpe2 = BPE(self.vocab_size)
+        bpe2.train(self.text)
+        bpe2.build_vocab()
+        self.assertEqual(self.bpe.vocab, bpe2.vocab)
 
 if __name__ == "__main__":
     unittest.main()
