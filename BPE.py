@@ -13,8 +13,17 @@ class BPE:
     """
 
     def __init__(self, vocab_size: int):
+        """
+            Byte-Pair Econding tokenizer.
+            
+            Arg:
+                Vocab_size: int Size of vocabulary and determines number 
+                                of merges when training. Set to arbitary
+                                value when loading saved merges. 
+        """
         self.merges = []
         self.vocab = {i: bytes([i]) for i in range(256)}
+        # Add 256 for ASCII
         self.vocab_size = vocab_size+256
         self.special_tokens = {'SOS': self.vocab_size,
                                 'PAD': (self.vocab_size+1),
@@ -121,17 +130,45 @@ class BPE:
         return [node.val for node in l]
 
 
-    def detokenize(self, seq: list[int]) -> list[str]:
+    def detokenize(self, seq: list[int]) -> str:
         """
            Use vocabulary hashtable to map token integer ids
-           to their corresponding merged character(s).
+           to their corresponding merged character(s). Handle special tokens.
 
-           Arg: 
-              seq: str Sequence of token ids
-              vocab: Dict Hashtable mapping token ids integer keys
-                     to merged character values
+           Arg:
+              seq: list[int] Sequence of token ids
+
+           Returns:
+              str: The detokenized string.
         """
-        return b''.join((self.vocab[t] for t in seq)).decode('utf-8')
+        detokenized_bytes = []
+        for t in seq:
+            # Check if the token is a special token
+            special_token_name = None
+            for name, token_id in self.special_tokens.items():
+                if t == token_id:
+                    special_token_name = name
+                    break
+
+            # Handle special tokens by skipping over them since 
+            # the translation function will handle them
+            if special_token_name:
+                #detokenized_bytes.append(special_token_name.encode('utf-8')) # Represent special tokens as their names
+                pass
+            elif t in self.vocab:
+                detokenized_bytes.append(self.vocab[t])
+            else:
+                # Skip over unkown tokens. This condition should not be meet
+                # since non-ASCII characters are replaced with ''.
+                # TODO have non-ASCII char be replace with b'UNK' token. 
+
+
+                print(f"Warning: Token ID {t} not found in vocabulary.")
+                # detokenized_bytes.append(b'<UNK>')
+                pass # Or skip the token for now
+
+
+        return b''.join(detokenized_bytes).decode('utf-8') 
 
     def save(self, file: str):
         """
@@ -143,16 +180,19 @@ class BPE:
 
     def build_vocab(self) -> Dict[str,int]:
         # Vocab is derived from merges.
-        self.vocab.clear()
+        # self.vocab.clear()
         self.vocab = {i: bytes([i]) for i in range(256)}
         for pair, idx in self.merges:
             self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
+        self.vocab_size = len(self.vocab)
 
     def load(self, file: str):
         #Load the merges from the file and then build the vocab
         with open(file, 'rb') as f:
             self.merges = pickle.load(f)
         self.build_vocab()
+    
+        
 
 class TestBPE(unittest.TestCase):
 
@@ -230,7 +270,7 @@ class TestBPE(unittest.TestCase):
         self.bpe.train(self.text)
         self.bpe.save("test_bpe_model")
         self.assertTrue(os.path.exists("test_bpe_model"))
-        bpe2 = BPE(self.vocab_size)
+        bpe2 = BPE(4)
         bpe2.load("test_bpe_model")
         self.assertEqual(self.bpe.merges, bpe2.merges)
         self.assertEqual(self.bpe.vocab, bpe2.vocab)
