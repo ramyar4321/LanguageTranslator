@@ -5,6 +5,11 @@ import re
 
 class CleanText:
     def __init__(self, text, num_rows):
+        """
+            Read and clean file. Set number of rows are read.
+            All characters are set to lower case
+            and non-ASCII characters are removed.
+        """
         self.text_file = text
         self.num_rows = num_rows
 

@@ -116,7 +116,8 @@ class BPE:
         """
         l = self.build_indexed_list(text)
         for pair, new_id in self.merges:
-            self.merge(pair, new_id, l, None)
+            if pair in l.index:
+                self.merge(pair, new_id, l, None)
         return [node.val for node in l]
 
 
