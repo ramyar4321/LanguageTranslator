@@ -18,9 +18,6 @@ class PrepareDS(Dataset):
         self.eos_token = torch.tensor([self.tokenizer_src.special_tokens["EOS"]], dtype=torch.int64)
         self.pad_token = torch.tensor([self.tokenizer_src.special_tokens["PAD"]], dtype=torch.int64)
 
-        # Precompute tgt_mask for the maximum target length
-        self.tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_len - 1).bool()  # -1 for decoder input
-
     def __len__(self):
         return len(self.src)
 

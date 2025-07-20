@@ -3,7 +3,10 @@ import torch
 from PositionalEncoding import PositionalEncoding
 from TokenEmbedding import TokenEmbedding
 import torch.nn as nn
+from tqdm import tqdm
 
+###########################################################
+# Define wrapper class for Transformer, and tests
 
 class TranslationTransformer(nn.Module):
     """
@@ -82,6 +85,18 @@ class TranslationTransformer(nn.Module):
         )
         # Project transformer output to vocabulary logits
         return self.generator(output)
+    
+    def get_tgt_mask(self, tgt_len: int) -> torch.tensor:
+        """
+            Generte a mask to prevent to ensures that during training,
+            the model cannot “see” future tokens in the target sequence,
+            simulating the real inference stage where the model only has
+            access to previously generated tokens.
+
+            Arg:
+                tgt_len: Target 
+        """
+        return nn.Transformer.generate_square_subsequent_mask(tgt_len - 1).bool()  # -1 for decoder input
 
 
 class TestTranslationTransformer(unittest.TestCase):
@@ -142,5 +157,102 @@ class TestTranslationTransformer(unittest.TestCase):
         for param in self.model.parameters():
             self.assertIsNotNone(param.grad)
 
+    def test_get_tgt_mask(self):
+        # Test that get_tgt_mask returns a square mask of correct shape and type
+        tgt_len = 10
+        mask = self.model.get_tgt_mask(tgt_len)
+        self.assertEqual(mask.shape, (tgt_len - 1, tgt_len - 1))
+        self.assertTrue(mask.dtype == torch.bool)
+        # Check that the mask is upper triangular (future tokens masked)
+        self.assertTrue(torch.equal(mask, torch.triu(torch.ones_like(mask), diagonal=1).bool()))
+
 if __name__ == "__main__":
     unittest.main()
+###########################################################
+
+
+###########################################################
+# Define training loop and perdict funtions 
+# that utilize the Transformer
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+def train_loop(model, optimizer, criterion, train_dataloader):
+    """
+    Runs one epoch of training for the translation transformer model.
+
+    Args:
+        model: The TranslationTransformer instance.
+        optimizer: Optimizer for updating model parameters.
+        criterion: Loss function (e.g., nn.CrossEntropyLoss).
+        train_dataloader: DataLoader yielding batches of training data.
+
+    Returns:
+        Average training loss for the epoch.
+    """
+    model.train()
+    train_loss = 0
+
+    for batch in tqdm(train_dataloader):
+        # Move batch tensors to the correct device
+        src_tokens = batch["src_tokens"].to(device)
+        dec_tokens = batch["dec_tokens"].to(device)
+        label_tokens = batch["label_tokens"].to(device)
+        tgt_padding_mask = batch["tgt_padding_mask"].to(device)
+        src_padding_mask = batch["src_padding_mask"].to(device)
+        # Generate target mask for decoder to prevent attending to future tokens
+        tgt_mask = model.get_tgt_mask(train_dataloader.tgt_len).to(device)
+
+        optimizer.zero_grad()
+        # Forward pass through the model
+        logits = model(src_tokens, dec_tokens, tgt_mask=tgt_mask, src_key_padding_mask=src_padding_mask, tgt_key_padding_mask=tgt_padding_mask)
+        # Compute loss
+        loss = criterion(logits.view(-1, logits.size(-1)), label_tokens.view(-1))
+        # Backpropagation
+        loss.backward()
+        optimizer.step()
+        train_loss += loss.item()
+
+    return train_loss / len(train_dataloader)
+
+def validation_loop(model, criterion, test_dataloader):
+    """
+    Runs one epoch of validation for the translation transformer model.
+
+    Args:
+        model: The TranslationTransformer instance.
+        criterion: Loss function (e.g., nn.CrossEntropyLoss).
+        test_dataloader: DataLoader yielding batches of validation data.
+
+    Returns:
+        Average validation loss for the epoch.
+    """
+    model.eval()
+    test_loss = 0
+    with torch.no_grad():
+        for batch in tqdm(test_dataloader):
+            # Move batch tensors to the correct device
+            src_tokens = batch["src_tokens"].to(device)
+            dec_tokens = batch["dec_tokens"].to(device)
+            label_tokens = batch["label_tokens"].to(device)
+            tgt_padding_mask = batch["tgt_padding_mask"].to(device)
+            src_padding_mask = batch["src_padding_mask"].to(device)
+            # Generate target mask for decoder to prevent attending to future tokens
+            tgt_mask = model.get_tgt_mask(test_dataloader.tgt_len).to(device)
+
+            # Forward pass through the model
+            logits = model(src_tokens, dec_tokens, tgt_mask=tgt_mask, src_key_padding_mask=src_padding_mask, tgt_key_padding_mask=tgt_padding_mask)
+            # Compute loss
+            loss = criterion(logits.view(-1, logits.size(-1)), label_tokens.view(-1))
+            test_loss += loss.item()
+
+    return test_loss / len(test_dataloader)
+
+def fit(model, optimizer, criterion, train_dataloader, test_dataloader, epochs=10):
+    for epoch in range(epochs):
+        print(f"Epoch {epoch + 1}/{epochs}")
+        train_loss = train_loop(model, optimizer, criterion, train_dataloader)
+        validation_loss = validation_loop(model, criterion, test_dataloader)
+        print(f"Training loss: {train_loss:.4f}")
+        print(f"Validation loss: {validation_loss:.4f}\n")
+###########################################################
