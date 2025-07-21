@@ -37,13 +37,15 @@ class TranslationTransformer(nn.Module):
         num_decoder_layers: int = 6,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        max_seq_length: int = 512,
+        max_src_len: int = 50,
+        max_tgt_len: int = 50,
     ):
         super().__init__()
         # Define layers
         self.src_embedding = TokenEmbedding(d_model ,src_vocab_size)
         self.tgt_embedding = TokenEmbedding(d_model, tgt_vocab_size)
-        self.pos_encoder = PositionalEncoding(d_model, max_seq_length, dropout)
+        self.src_pos_encoding = PositionalEncoding(d_model, max_src_len, dropout)
+        self.tgt_pos_encoding = PositionalEncoding(d_model, max_tgt_len, dropout)
         self.transformer = nn.Transformer(
             d_model=d_model,
             nhead=nhead,
@@ -74,8 +76,8 @@ class TranslationTransformer(nn.Module):
         # Embed and apply positional encoding to source and target tokens
         src_emb = self.src_embedding(src)
         tgt_emb = self.tgt_embedding(tgt)
-        src_emb = self.pos_encoder(src_emb)
-        tgt_emb = self.pos_encoder(tgt_emb)
+        src_emb = self.src_pos_encoding(src_emb)
+        tgt_emb = self.tgt_pos_encoding(tgt_emb)
         # Pass through transformer
         output = self.transformer(
             src_emb, tgt_emb,
@@ -95,7 +97,7 @@ class TranslationTransformer(nn.Module):
         Returns:
             torch.Tensor: Encoded memory (batch_size, src_seq_len, d_model).
         """
-        return self.transformer.encoder(self.pos_encoder(
+        return self.transformer.encoder(self.src_pos_encoding(
                             self.src_embedding(src)), src_mask)
     def decode(self, tgt: torch.Tensor, memory: torch.Tensor, tgt_mask: torch.Tensor):
         """Decodes the target sequence using the transformer decoder.
@@ -106,7 +108,7 @@ class TranslationTransformer(nn.Module):
             Returns:
                 torch.Tensor: Decoded output (batch_size, tgt_seq_len, d_model).
         """
-        return self.transformer.decoder(self.pos_encoder(
+        return self.transformer.decoder(self.tgt_pos_encoding(
                           self.tgt_embedding(tgt)), memory,
                           tgt_mask)
     
@@ -128,7 +130,8 @@ class TestTranslationTransformer(unittest.TestCase):
         self.src_vocab_size = 50
         self.tgt_vocab_size = 60
         self.d_model = 32
-        self.max_seq_length = 16
+        self.max_src_len = 16
+        self.max_tgt_len = 16
         self.model = TranslationTransformer(
             src_vocab_size=self.src_vocab_size,
             tgt_vocab_size=self.tgt_vocab_size,
@@ -138,7 +141,8 @@ class TestTranslationTransformer(unittest.TestCase):
             num_decoder_layers=2,
             dim_feedforward=64,
             dropout=0.1,
-            max_seq_length=self.max_seq_length
+            max_src_len=self.max_src_len,
+            max_tgt_len=self.max_tgt_len
         )
 
     def test_forward_output_shape(self):
