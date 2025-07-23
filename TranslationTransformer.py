@@ -25,7 +25,7 @@ class TranslationTransformer(nn.Module):
         num_decoder_layers (int): Number of decoder layers.
         dim_feedforward (int): Dimension of the feedforward network.
         dropout (float): Dropout rate.
-        max_seq_length (int): Maximum sequence length 
+        max_seq_length (int): Maximum sequence length
     """
     def __init__(
         self,
@@ -89,7 +89,7 @@ class TranslationTransformer(nn.Module):
         # Project transformer output to vocabulary logits
         return self.generator(output)
 
-    def encode(self, src: torch.Tensor, src_mask: torch.Tensor):
+    def encoder(self, src: torch.Tensor, src_mask: torch.Tensor=None):
         """Encodes the source sequence using the transformer encoder.
         Args:
             src (torch.Tensor): Source token indices (batch_size, src_seq_len).
@@ -99,9 +99,9 @@ class TranslationTransformer(nn.Module):
         """
         return self.transformer.encoder(self.src_pos_encoding(
                             self.src_embedding(src)), src_mask)
-    def decode(self, tgt: torch.Tensor, memory: torch.Tensor, tgt_mask: torch.Tensor):
+    def decoder(self, tgt: torch.Tensor, memory: torch.Tensor, tgt_mask: torch.Tensor):
         """Decodes the target sequence using the transformer decoder.
-        Args:  
+        Args:
             tgt (torch.Tensor): Target token indices (batch_size, tgt_seq_len).
             memory (torch.Tensor): Encoded memory from the encoder (batch_size, src_seq_len, d_model).
             tgt_mask (torch.Tensor): Target attention mask.
@@ -111,7 +111,7 @@ class TranslationTransformer(nn.Module):
         return self.transformer.decoder(self.tgt_pos_encoding(
                           self.tgt_embedding(tgt)), memory,
                           tgt_mask)
-    
+
     def get_tgt_mask(self, tgt_len: int) -> torch.tensor:
         """
             Generte a mask to prevent to ensures that during training,
@@ -120,10 +120,9 @@ class TranslationTransformer(nn.Module):
             access to previously generated tokens.
 
             Arg:
-                tgt_len: Target 
+                tgt_len: Target
         """
-        return nn.Transformer.generate_square_subsequent_mask(tgt_len - 1).bool()  # -1 for decoder input
-
+        return nn.Transformer.generate_square_subsequent_mask(tgt_len).bool()  # Corrected mask size
 
 class TestTranslationTransformer(unittest.TestCase):
     def setUp(self):
@@ -189,7 +188,7 @@ class TestTranslationTransformer(unittest.TestCase):
         # Test that get_tgt_mask returns a square mask of correct shape and type
         tgt_len = 10
         mask = self.model.get_tgt_mask(tgt_len)
-        self.assertEqual(mask.shape, (tgt_len - 1, tgt_len - 1))
+        self.assertEqual(mask.shape, (tgt_len, tgt_len))
         self.assertTrue(mask.dtype == torch.bool)
         # Check that the mask is upper triangular (future tokens masked)
         self.assertTrue(torch.equal(mask, torch.triu(torch.ones_like(mask), diagonal=1).bool()))
@@ -201,7 +200,7 @@ class TestTranslationTransformer(unittest.TestCase):
         src = torch.randint(0, self.src_vocab_size, (batch_size, src_seq_len))
         src_mask = torch.zeros(src_seq_len, src_seq_len)
         # Should return (batch_size, src_seq_len, d_model)
-        memory = self.model.encode(src, src_mask)
+        memory = self.model.encoder(src, src_mask)
         self.assertEqual(memory.shape, (batch_size, src_seq_len, self.d_model))
 
     def test_decode_output_shape(self):
@@ -213,7 +212,7 @@ class TestTranslationTransformer(unittest.TestCase):
         memory = torch.randn(batch_size, src_seq_len, self.d_model)
         tgt_mask = torch.zeros(tgt_seq_len, tgt_seq_len)
         # Should return (batch_size, tgt_seq_len, d_model)
-        out = self.model.decode(tgt, memory, tgt_mask)
+        out = self.model.decoder(tgt, memory, tgt_mask)
         self.assertEqual(out.shape, (batch_size, tgt_seq_len, self.d_model))
 
 if __name__ == "__main__":
@@ -251,7 +250,7 @@ def train_loop(model, optimizer, criterion, train_dataloader):
         tgt_padding_mask = batch["tgt_padding_mask"].to(device)
         src_padding_mask = batch["src_padding_mask"].to(device)
         # Generate target mask for decoder to prevent attending to future tokens
-        tgt_mask = model.get_tgt_mask(train_dataloader.tgt_len).to(device)
+        tgt_mask = model.get_tgt_mask(dec_tokens.size(1)).to(device)
 
         optimizer.zero_grad()
         # Forward pass through the model
@@ -288,7 +287,7 @@ def validation_loop(model, criterion, test_dataloader):
             tgt_padding_mask = batch["tgt_padding_mask"].to(device)
             src_padding_mask = batch["src_padding_mask"].to(device)
             # Generate target mask for decoder to prevent attending to future tokens
-            tgt_mask = model.get_tgt_mask(test_dataloader.tgt_len).to(device)
+            tgt_mask = model.get_tgt_mask(dec_tokens.size(1)).to(device)
 
             # Forward pass through the model
             logits = model(src_tokens, dec_tokens, tgt_mask=tgt_mask, src_key_padding_mask=src_padding_mask, tgt_key_padding_mask=tgt_padding_mask)
@@ -306,79 +305,79 @@ def fit(model, optimizer, criterion, train_dataloader, test_dataloader, epochs=1
         print(f"Training loss: {train_loss:.4f}")
         print(f"Validation loss: {validation_loss:.4f}\n")
 
-def translate(eng_sentence: str, model: TranslationTransformer, 
+def translate(eng_sentence: str, model: TranslationTransformer,
             tokenizer_en, tokenizer_fr, max_tgt_len):
     """
     Translate an English sentence to French using the trained Transformer model.
-    
+
     Args:
         eng_sentence (str): Input English sentence
         model (nn.Transformer): Trained Transformer model
         tokenizer_en (Tokenizer): English tokenizer
         tokenizer_fr (Tokenizer): French tokenizer
         max_len (int): Maximum length of the generated French sentence
-    
+
     Returns:
         str: Translated French sentence
     """
-    
+
     # Preprocess the input English sentence
     eng_sentence = eng_sentence.lower()
     eng_sentence = re.sub(r'[^a-zA-ZÀ-ÿ!? \.]', '', eng_sentence)
-    
+
     # Tokenize and prepare source input
-    enc_input_tokens = tokenizer_en.encode(eng_sentence).ids
+    enc_input_tokens = tokenizer_en.tokenize(eng_sentence)
     src_tokens = torch.cat([
-        torch.tensor([tokenizer_en.token_to_id("[SOS]")], dtype=torch.int64),
+        torch.tensor([tokenizer_en.special_tokens["SOS"]], dtype=torch.int64),
         torch.tensor(enc_input_tokens, dtype=torch.int64),
-        torch.tensor([tokenizer_en.token_to_id("[EOS]")], dtype=torch.int64),
-        torch.tensor([tokenizer_en.token_to_id("[PAD]")], dtype=torch.int64).repeat(max_en_len - len(enc_input_tokens) - 2)
+        torch.tensor([tokenizer_en.special_tokens["EOS"]], dtype=torch.int64),
+        torch.tensor([tokenizer_en.special_tokens["PAD"]], dtype=torch.int64).repeat(max_en_len - len(enc_input_tokens) - 2)
     ]).unsqueeze(0).to(device) # Shape: [1, src_len]
 
 
     # Initialize target sequence with [SOS]
-    tgt_tokens = torch.tensor([tokenizer_fr.token_to_id("[SOS]")], dtype=torch.int64).unsqueeze(0).to(device)  # Shape: [1, 1]
-    
+    tgt_tokens = torch.tensor([tokenizer_fr.special_tokens["SOS"]], dtype=torch.int64).unsqueeze(0).to(device)  # Shape: [1, 1]
+
     # Autoregressive decoding
-    tgt_tokens=perdict(model, src_tokens, tgt_tokens, max_tgt_len,tokenizer_fr.token_to_id("[EOS]"))
-    
+    tgt_tokens=perdict(model, src_tokens, tgt_tokens, max_tgt_len,tokenizer_fr.special_tokens["EOS"])
+
     # Decode the token sequence to a French sentence
     fr_ids = tgt_tokens[0].cpu().tolist()
-    fr_sentence = tokenizer_fr.decode(fr_ids)
-    
+    fr_sentence = tokenizer_fr.detokenize(fr_ids)
+
     # Clean up the output (remove special tokens)
-    fr_sentence = fr_sentence.replace("[SOS]", "").replace("[EOS]", "").replace("[PAD]", "").strip()
-    
+    fr_sentence = fr_sentence.replace("SOS", "").replace("EOS", "").replace("PAD", "").strip()
+
     return fr_sentence
 
-def perdict(model: TranslationTransformer, 
+def perdict(model: TranslationTransformer,
             src_tokens, tgt_tokens, max_tgt_len, EOS_IDX):
     """
-        
+
     """
     model.eval()
-    
-    
+
+
     # Encode the source sentence
     memory = model.encoder(src_tokens)  # Shape: [1, src_len, d_model]
 
     # Autoregressive decoding
     for i in range(max_tgt_len):
         tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_tokens.size(1)).bool().to(device)
-        
+
         # Decode step
-        output = model.decoder(tgt_tokens, memory, tgt_mask=tgt_mask) # Shape: [1, tgt_len, d_model] 
+        output = model.decoder(tgt_tokens, memory, tgt_mask=tgt_mask) # Shape: [1, tgt_len, d_model]
         logits = model.generator(output[:, -1, :])  # Predict next token: [1, fr_vocab]
         next_token = torch.argmax(logits, dim=-1)  # Shape: [1]
-        
+
         # Append predicted token
         tgt_tokens = torch.cat([tgt_tokens, next_token.unsqueeze(0)], dim=1)  # Shape: [1, tgt_len + 1]
-        
+
         # Stop if [EOS] is predicted
         if next_token.item() == EOS_IDX:
             break
-    
-    
+
+
     return tgt_tokens
 
 

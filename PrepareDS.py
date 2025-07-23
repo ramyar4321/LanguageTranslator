@@ -5,14 +5,14 @@ from BPE import BPE
 import unittest
 
 class PrepareDS(Dataset):
-    # Prepares the dataset to be feed into a Transformer 
+    # Prepares the dataset to be feed into a Transformer
     def __init__(self, bpe_src, bpe_tgt, src_text, tgt_text, src_len, tgt_len):
         self.tokenizer_src = bpe_src
         self.tokenizer_tgt = bpe_tgt
         self.src = src_text
         self.tgt = tgt_text
-        self.src_len = src_len 
-        self.tgt_len = tgt_len 
+        self.src_len = src_len
+        self.tgt_len = tgt_len
 
         self.sos_token = torch.tensor([self.tokenizer_src.special_tokens["SOS"]], dtype=torch.int64)
         self.eos_token = torch.tensor([self.tokenizer_src.special_tokens["EOS"]], dtype=torch.int64)
@@ -79,11 +79,11 @@ class TestPrepareDS(unittest.TestCase):
                           "J'apprends le français."]
         self.src_len = 40
         self.tgt_len = 40
-        self.bpe_src = BPE(3)
-        self.bpe_tgt = BPE(3)
+        self.bpe_src = BPE()
+        self.bpe_tgt = BPE()
         # Train BPEs on the test data to initialize vocab and merges
-        self.bpe_src.train(" ".join(self.src_texts))
-        self.bpe_tgt.train(" ".join(self.tgt_texts))
+        self.bpe_src.train(" ".join(self.src_texts),3)
+        self.bpe_tgt.train(" ".join(self.tgt_texts),3)
         self.ds = PrepareDS(
             self.bpe_src, self.bpe_tgt,
             self.src_texts, self.tgt_texts,

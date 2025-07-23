@@ -2,7 +2,7 @@ import unittest
 
 class LL_Node:
     """
-        A node in a doubly linked list. 
+        A node in a doubly linked list.
         The node's value is one or more characters.
     """
     __slots__ = 'val', 'prev', 'next'
@@ -19,20 +19,17 @@ class LL_Node:
 class IndexedList:
 
     """
-        A doubly linked list of LL_nodes represents a given text where each node
-        represents one or more characters. The index maps the key 
-        (X, Y) where X and Y are one or more characters in the given text
-        to all nodes that might contain X and whose next node might contain Y. 
-        The index hashtable allows quick access when merging pair (X,Y), but
-        the index is might be stale from previous merges since
-        we always add and never remove nodes thus we need to we need 
-        to make sure that the nodes still hold the desired pairs when iterating
-        over the nodes.
+        This doubly linked list stores the characters (or bytes)
+        of the input text, and its index dictionary
+        maps pairs of tokens to the nodes where they appear.
     """
 
     def __init__(self, text: str):
-        """ Create a double linked list of nodes for each character
-            in text. Index each pair (X,Y) in the given text into a hashtable.
+        """
+            The index stores a list of nodes for each pair.
+            As merges occur, some of these nodes might become "stale"
+            (no longer represent the original pair).
+            The downstream merge must check for staleness.
         """
         self.index = {}
         text = iter(text)
@@ -58,7 +55,7 @@ class IndexedList:
             self.add_to_index((node.val, node.next.val), node)
 
     def add_to_index(self, pair: str, node: LL_Node) ->  None:
-        # Add node to the index for the given pair 
+        # Add node to the list of nodes for given pair.
         self.index.setdefault(pair, []).append(node)
 
 class TestIndexedList(unittest.TestCase):
@@ -118,22 +115,6 @@ class TestIndexedList(unittest.TestCase):
         print(ilist.index)
         self.assertIn(('a', 'bc'), ilist.index)
         self.assertIn(node_b, ilist.index[('bc', 'd')])
-
-    """def test_update_index2(self):
-        ilist = IndexedList("abz")
-        # Merge 'b' and 'z' into one node
-        node_b = ilist.start.next
-        node_z = node_b.next
-        node_b.val += node_z.val  # 'bz'
-        node_b.next = None
-        # Remove node_z from the list
-        node_z.prev = None
-        # Update index for node_b
-        ilist.update_index(node_b)
-        # Should update index for ('a','bz')
-        print(ilist.index)
-        self.assertIn(('a', 'bz'), ilist.index)
-        self.assertIn(node_b, ilist.index[('a', 'bz')])"""
 
 if __name__ == "__main__":
     unittest.main()

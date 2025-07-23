@@ -15,14 +15,14 @@ class GPU_BPE:
         self.special_tokens = {}
         self.vocab = {}
 
-    def build_indexed_list(self, text: str) -> IndexedList:  
+    def build_indexed_list(self, text: str) -> IndexedList:
         # Create an IndexedList with the encoded bytes.
         return IndexedList(t for t in text.encode('utf-8'))
 
-    def cpu_merge(self, pair: tuple[str, str], new_id: int, 
+    def cpu_merge(self, pair: tuple[str, str], new_id: int,
                 indexed_list: IndexedList, stats: CountPair=None) -> None:
-        """ 
-            Find all instances of the given pair in the index list 
+        """
+            Find all instances of the given pair in the index list
             and merge them to form the new_id. If this function
             is called by the train function, then the CountPair is
             updated for each merge.
@@ -31,13 +31,13 @@ class GPU_BPE:
             where each merge is O(1). For each merge, CountPair
             is updated which is also O(log L) where L is the training text
             length, thus this function has a time complexity of O(M LogL)
-            
+
         """
         for node in indexed_list.index[pair]: # O(M)
             if node.val != pair[0] or node.next is None or node.next.val != pair[1]:
                 # The index was stale - continue.
                 continue
-            # Say we're merging "bc" to "X" in "abcd", 
+            # Say we're merging "bc" to "X" in "abcd",
             # and the node we're visiting now is "b".
             # O(log L) due to heapify operations
             if stats is not None:  # Update the stats.
@@ -120,10 +120,10 @@ class GPU_BPE:
             #merges[pair] = idx
             merges.append((pair, idx))
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
-        self.special_tokens[vocab_size] = 'SOS'
-        self.special_tokens[vocab_size+1] = 'EOS'
-        self.special_tokens[vocab_size+2] = 'PAD'
-        for idx, special in self.special_tokens.items():
+        self.special_tokens['SOS'] = vocab_size
+        self.special_tokens['EOS'] = vocab_size+1
+        self.special_tokens['PAD'] = vocab_size+2
+        for special, idx in self.special_tokens.items():
             vocab[idx] = special.encode("utf-8")
 
         # save class variables
@@ -133,7 +133,7 @@ class GPU_BPE:
     def tokenize(self, text):
         """
            Use merges array to map the characters in the given text
-           to token integer ids. 
+           to token integer ids.
         """
         l = self.build_indexed_list(text)
         for pair, new_id in self.merges:
@@ -161,7 +161,7 @@ class GPU_BPE:
         self.vocab = {idx: bytes([idx]) for idx in range(256)}
         for (p0, p1), idx in self.merges:
             self.vocab[idx] = self.vocab[p0] + self.vocab[p1]
-        for idx,special in self.special_tokens.items():
+        for special, idx in self.special_tokens.items():
             self.vocab[idx] = special.encode("utf-8")
 
     def load(self, file: str):

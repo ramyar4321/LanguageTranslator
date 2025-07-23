@@ -12,22 +12,13 @@ class BPE:
        Byte-Pair Econding tokenizer
     """
 
-    def __init__(self, vocab_size: int):
+    def __init__(self):
         """
             Byte-Pair Econding tokenizer.
-            
-            Arg:
-                Vocab_size: int Size of vocabulary and determines number 
-                                of merges when training. Set to arbitary
-                                value when loading saved merges. 
         """
         self.merges = []
-        self.vocab = {i: bytes([i]) for i in range(256)}
-        # Add 256 for ASCII
-        self.vocab_size = vocab_size+256
-        self.special_tokens = {'SOS': self.vocab_size,
-                                'PAD': (self.vocab_size+1),
-                                'EOS': self.vocab_size+2}
+        self.special_tokens = {}
+        self.vocab = {}
 
     def build_indexed_list(self, text: str) -> IndexedList:  
         # Create an IndexedList with the encoded bytes.
@@ -53,11 +44,10 @@ class BPE:
             This function performs M merges in the IndexedList
             where each merge is O(1). For each merge, CountPair
             is updated which is also O(log L) where L is the training text
-            length, thus this function has a time complexity of O(M)
+            length, thus this function has a time complexity of O(M LogL)
             
         """
-        # O(M)
-        for node in indexed_list.index[pair]:
+        for node in indexed_list.index[pair]: # O(M)
             if node.val != pair[0] or node.next is None or node.next.val != pair[1]:
                 # The index was stale - continue.
                 continue
@@ -78,7 +68,7 @@ class BPE:
             indexed_list.update_index(node)  # Add "aX" and "Xd" to the index.
 
 
-    def train(self, text: str) -> tuple[list[tuple[str,int]], Dict[str, int]]:
+    def train(self, text: str, vocab_size: int) -> tuple[list[tuple[str,int]], Dict[str, int]]:
         """
            Form the merges from the text.
            Iteratively find the most common pair of token ids and merge them
@@ -102,20 +92,22 @@ class BPE:
            Arg:
               text: str Used to create the merge vocab 
         """
-        self.merges.clear()
-        self.vocab.clear()
-        self.vocab = {i: bytes([i]) for i in range(256)}
-        print(f'Training tokenizer on text of length {len(text):,} with vocab of size {self.vocab_size:,}.')
-        n_merges = self.vocab_size - 256
+        print(f'Training tokenizer on text of length {len(text):,} with vocab of size {vocab_size:,}.')        
+        n_merges = vocab_size - 256
         indexed_list = self.build_indexed_list(text)
         stats = self.init_pairs_stats(text)
         for i in range(n_merges):
             if not stats: break  # Stop if we don't have any pairs (we should probably stop earlier).
             top_pair = stats.most_common
-            new_id = len(self.vocab)
+            new_id = 256+i
             self.merges.append((top_pair, new_id))
-            self.vocab[new_id] = self.vocab[top_pair[0]] + self.vocab[top_pair[1]]
             self.merge(top_pair, new_id, indexed_list, stats)
+        # Build special tokens and vocab
+        self.special_tokens['SOS'] = vocab_size
+        self.special_tokens['EOS'] = vocab_size+1
+        self.special_tokens['PAD'] = vocab_size+2
+        self.build_vocab()
+
 
 
     def tokenize(self, text: str, ) -> list[int]:
@@ -141,34 +133,7 @@ class BPE:
            Returns:
               str: The detokenized string.
         """
-        detokenized_bytes = []
-        for t in seq:
-            # Check if the token is a special token
-            special_token_name = None
-            for name, token_id in self.special_tokens.items():
-                if t == token_id:
-                    special_token_name = name
-                    break
-
-            # Handle special tokens by skipping over them since 
-            # the translation function will handle them
-            if special_token_name:
-                #detokenized_bytes.append(special_token_name.encode('utf-8')) # Represent special tokens as their names
-                pass
-            elif t in self.vocab:
-                detokenized_bytes.append(self.vocab[t])
-            else:
-                # Skip over unkown tokens. This condition should not be meet
-                # since non-ASCII characters are replaced with ''.
-                # TODO have non-ASCII char be replace with b'UNK' token. 
-
-
-                print(f"Warning: Token ID {t} not found in vocabulary.")
-                # detokenized_bytes.append(b'<UNK>')
-                pass # Or skip the token for now
-
-
-        return b''.join(detokenized_bytes).decode('utf-8') 
+        return b''.join((self.vocab[t] for t in seq)).decode('utf-8')
 
     def save(self, file: str):
         """
@@ -176,20 +141,21 @@ class BPE:
            since it can be recovered from merges.
         """
         with open(file, 'wb') as f:
-            pickle.dump(self.merges, f)
+            pickle.dump((self.special_tokens,self.merges), f)
 
     def build_vocab(self) -> Dict[str,int]:
         # Vocab is derived from merges.
-        # self.vocab.clear()
-        self.vocab = {i: bytes([i]) for i in range(256)}
-        for pair, idx in self.merges:
-            self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
-        self.vocab_size = len(self.vocab)
+        self.vocab = {idx: bytes([idx]) for idx in range(256)}
+        for (p0, p1), idx in self.merges:
+            self.vocab[idx] = self.vocab[p0] + self.vocab[p1]
+        for special, idx in self.special_tokens.items():
+            self.vocab[idx] = special.encode("utf-8")
+
 
     def load(self, file: str):
         #Load the merges from the file and then build the vocab
         with open(file, 'rb') as f:
-            self.merges = pickle.load(f)
+            self.special_tokens, self.merges = pickle.load(f)
         self.build_vocab()
     
         
@@ -197,9 +163,9 @@ class BPE:
 class TestBPE(unittest.TestCase):
 
     def setUp(self):
-        #self.vocab_size = 260
-        self.vocab_size = 4
-        self.bpe = BPE(self.vocab_size)
+        self.vocab_size = 260
+        #self.vocab_size = 4
+        self.bpe = BPE()
         self.text = "aaabdaaabac"
 
     def test_merge_with_no_stats(self):
@@ -245,7 +211,7 @@ class TestBPE(unittest.TestCase):
 
         """
 
-        self.bpe.train(self.text)
+        self.bpe.train(self.text, self.vocab_size)
         expected_merges = [((ord('a'), ord('a')), 256), 
                             ((ord('a'), ord('b')), 257),
                             ((256, 257), 258),
@@ -255,22 +221,25 @@ class TestBPE(unittest.TestCase):
         expected_vocab[257] = b'ab'
         expected_vocab[258] = b'aaab'
         expected_vocab[259] = b'aaabd'
+        expected_vocab[260] = b'SOS'
+        expected_vocab[261] = b'EOS'
+        expected_vocab[262] = b'PAD'
         self.assertEqual(self.bpe.merges, expected_merges)
         self.assertEqual(self.bpe.vocab, expected_vocab)
 
     def test_tokenize_then_detokenize(self):
         # The detokenization of tokenization should
         # return the original text
-        self.bpe.train(self.text)
+        self.bpe.train(self.text, self.vocab_size)
         tokens = self.bpe.tokenize(self.text)
         detok = self.bpe.detokenize(tokens)
         self.assertEqual(detok, self.text)
 
     def test_save_and_load(self):
-        self.bpe.train(self.text)
+        self.bpe.train(self.text, self.vocab_size)
         self.bpe.save("test_bpe_model")
         self.assertTrue(os.path.exists("test_bpe_model"))
-        bpe2 = BPE(4)
+        bpe2 = BPE()
         bpe2.load("test_bpe_model")
         self.assertEqual(self.bpe.merges, bpe2.merges)
         self.assertEqual(self.bpe.vocab, bpe2.vocab)
@@ -280,9 +249,10 @@ class TestBPE(unittest.TestCase):
         # Test the build_vocab function
         # Assumption: Vocab is cleared pior to values
         # being populated, otherwise the result of this test is invalid
-        self.bpe.train(self.text)
-        bpe2 = BPE(self.vocab_size)
-        bpe2.train(self.text)
+        self.bpe.train(self.text, self.vocab_size)
+        bpe2 = BPE()
+        bpe2.merges = self.bpe.merges
+        bpe2.special_tokens = self.bpe.special_tokens
         bpe2.build_vocab()
         self.assertEqual(self.bpe.vocab, bpe2.vocab)
 

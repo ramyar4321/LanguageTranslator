@@ -4,7 +4,7 @@ import os
 import re
 
 class CleanText:
-    def __init__(self, text, num_rows):
+    def __init__(self, text, num_rows=None):
         """
             Read and clean file. Set number of rows are read.
             All characters are set to lower case
@@ -18,6 +18,7 @@ class CleanText:
         fr = []
 
         # read only specific number of rows
+        #if self.num_rows != None
         df = pd.read_csv(self.text_file, nrows=self.num_rows)
         df = df.reset_index()
 

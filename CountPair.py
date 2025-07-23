@@ -21,10 +21,10 @@ class MH_Node:
 
 class CountPair:
     """
-       This class is a modified max heap data structure used to 
-       keep count of pairs of character(s) in a given text. 
-       The max heap is implemented as an array and 
-       a hashtable is used to map the pair to the nodes in the heap. 
+       This class is a modified max heap data structure used to
+       keep count of pairs of character(s) in a given text.
+       The max heap is implemented as an array and
+       a hashtable is used to map the pair to the nodes in the heap.
     """
     def __init__(self, text: str):
         self.l = []  # A heap of nodes.
